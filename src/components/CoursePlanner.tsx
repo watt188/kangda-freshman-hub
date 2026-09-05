@@ -1,111 +1,24 @@
 "use client";
-
-import { useEffect, useMemo, useState } from "react";
-
-type Tier = "A" | "B" | "C" | "";
-type CourseType = "通识选修课" | "体育课" | "专业外课程";
-type Course = {
-  id: string; name: string; type: CourseType; module: string; credits: number;
-  teacher: string; time: string; capacity: number; remaining: number;
-  conflict: boolean; value: number; interest: number; relevance: number; tier: Tier;
-};
-
-const KEY = "kangda-v1.1-courses";
-const blank = (): Course => ({
-  id: crypto.randomUUID(), name: "", type: "通识选修课", module: "", credits: 1,
-  teacher: "", time: "", capacity: 0, remaining: 0, conflict: false,
-  value: 3, interest: 3, relevance: 3, tier: ""
-});
-const urgency = (c: Course) => c.capacity > 0 ? Math.max(0, 5 - (c.remaining / c.capacity) * 5) : 0;
-const score = (c: Course) => c.value*.35 + c.interest*.20 + c.relevance*.20 + Math.min(5,Math.max(1,c.credits))*.10 + urgency(c)*.15;
-const autoTier = (c: Course): Tier => {
-  if (c.conflict || (c.capacity > 0 && c.remaining <= 0)) return "";
-  const s = score(c); return s >= 3.9 ? "A" : s >= 3.1 ? "B" : "C";
-};
-
-export default function CoursePlanner() {
-  const [courses,setCourses] = useState<Course[]>([]);
-  const [draft,setDraft] = useState<Course>(blank());
-  const [target,setTarget] = useState(2);
-
-  useEffect(()=>{ try { const s=localStorage.getItem(KEY); if(s) setCourses(JSON.parse(s)); } catch {} },[]);
-  useEffect(()=>{ localStorage.setItem(KEY,JSON.stringify(courses)); },[courses]);
-
-  const normalized = useMemo(()=>courses.map(c=>({...c,tier:c.tier||autoTier(c)})),[courses]);
-  const plans = useMemo(()=>{
-    const pick=(t:Tier)=>normalized.filter(c=>c.tier===t&&!c.conflict&&!(c.capacity>0&&c.remaining<=0)).sort((a,b)=>score(b)-score(a));
-    return {A:pick("A"),B:pick("B"),C:pick("C")};
-  },[normalized]);
-  const execution = useMemo(()=>{
-    const w:Record<string,number>={A:3,B:2,C:1};
-    return [...normalized].filter(c=>c.tier&&!c.conflict&&!(c.capacity>0&&c.remaining<=0)).sort((a,b)=>{
-      if(w[b.tier]-w[a.tier]) return w[b.tier]-w[a.tier];
-      const ar=a.capacity? a.remaining/a.capacity:1, br=b.capacity? b.remaining/b.capacity:1;
-      return ar!==br ? ar-br : score(b)-score(a);
-    });
-  },[normalized]);
-
-  const add=()=>{
-    if(!draft.name.trim()) return;
-    setCourses(x=>[...x,{...draft,name:draft.name.trim(),teacher:draft.teacher.trim(),time:draft.time.trim(),module:draft.module.trim()}]);
-    setDraft(blank());
-  };
-  const tier=(id:string,t:Tier)=>setCourses(x=>x.map(c=>c.id===id?{...c,tier:t}:c));
-  const remove=(id:string)=>setCourses(x=>x.filter(c=>c.id!==id));
-  const credits=(arr:Course[])=>arr.reduce((s,c)=>s+c.credits,0);
-
-  return <div className="planner-shell">
-    <div className="planner-note"><b>真实数据原则：</b>这里只录入你在教务系统实际看到的课程，不预填未公布课程。最终以学校教务系统为准。</div>
-
-    <section className="planner-panel">
-      <div className="planner-head"><span>01 / COURSE ENTRY</span><h3>录入课程</h3></div>
-      <div className="course-form">
-        <label>课程名称<input value={draft.name} onChange={e=>setDraft({...draft,name:e.target.value})} placeholder="课程名称"/></label>
-        <label>类型<select value={draft.type} onChange={e=>setDraft({...draft,type:e.target.value as CourseType})}><option>通识选修课</option><option>体育课</option><option>专业外课程</option></select></label>
-        <label>模块<input value={draft.module} onChange={e=>setDraft({...draft,module:e.target.value})} placeholder="六模块中的所属模块"/></label>
-        <label>学分<input type="number" step=".5" min="0" value={draft.credits} onChange={e=>setDraft({...draft,credits:+e.target.value})}/></label>
-        <label>教师<input value={draft.teacher} onChange={e=>setDraft({...draft,teacher:e.target.value})}/></label>
-        <label>上课时间<input value={draft.time} onChange={e=>setDraft({...draft,time:e.target.value})} placeholder="周一 3-4节"/></label>
-        <label>容量<input type="number" min="0" value={draft.capacity} onChange={e=>setDraft({...draft,capacity:+e.target.value})}/></label>
-        <label>剩余名额<input type="number" min="0" value={draft.remaining} onChange={e=>setDraft({...draft,remaining:+e.target.value})}/></label>
-        <label>课程价值 0-5<input type="number" min="0" max="5" value={draft.value} onChange={e=>setDraft({...draft,value:+e.target.value})}/></label>
-        <label>个人兴趣 0-5<input type="number" min="0" max="5" value={draft.interest} onChange={e=>setDraft({...draft,interest:+e.target.value})}/></label>
-        <label>专业相关性 0-5<input type="number" min="0" max="5" value={draft.relevance} onChange={e=>setDraft({...draft,relevance:+e.target.value})}/></label>
-        <label className="check-label"><input type="checkbox" checked={draft.conflict} onChange={e=>setDraft({...draft,conflict:e.target.checked})}/>与课表冲突</label>
-      </div>
-      <button className="button primary planner-add" onClick={add}>＋ 加入课程池</button>
-
-      <div className="course-list">
-        {!courses.length && <div className="empty-state">课程池为空。等系统出现真实课程后再录入。</div>}
-        {courses.map(c=><article className="course-row" key={c.id}>
-          <div><small>{c.type}{c.module?` · ${c.module}`:""}</small><strong>{c.name}</strong><span>{c.credits}学分 · {c.teacher||"教师待填"} · {c.time||"时间待填"}</span></div>
-          <div className="seat-box"><small>剩余</small><b>{c.remaining}{c.capacity?` / ${c.capacity}`:""}</b></div>
-          <div className="tier-actions">{(["A","B","C"] as Tier[]).map(t=><button className={c.tier===t?"active":""} key={t} onClick={()=>tier(c.id,t)}>{t}</button>)}<button onClick={()=>tier(c.id,"")}>自动</button><button onClick={()=>remove(c.id)}>×</button></div>
-        </article>)}
-      </div>
-    </section>
-
-    <section className="planner-panel">
-      <div className="planner-head planner-split"><div><span>02 / PLAN</span><h3>生成 A / B / C 方案</h3></div><label>目标学分<input type="number" min="0" step=".5" value={target} onChange={e=>setTarget(+e.target.value)}/></label></div>
-      <div className="plan-grid">
-        {(["A","B","C"] as const).map(t=><div className="plan-card" key={t}>
-          <div className="plan-title"><b>{t}</b><span>{t==="A"?"首选组合":t==="B"?"替代组合":"保底组合"}</span></div>
-          <div className="plan-credit">{credits(plans[t])} / {target} 学分</div>
-          {!plans[t].length?<p>暂无课程</p>:plans[t].map(c=><div className="plan-item" key={c.id}><strong>{c.name}</strong><span>{c.credits}学分 · 剩{c.remaining}{c.capacity?`/${c.capacity}`:""}</span></div>)}
-        </div>)}
-      </div>
-      <p className="planner-footnote">自动分层：课程价值35% + 兴趣20% + 专业相关性20% + 学分效率10% + 名额紧张度15%。可手动覆盖 A/B/C。</p>
-    </section>
-
-    <section className="planner-panel">
-      <div className="planner-head"><span>03 / BATTLE ORDER</span><h3>输出选课顺序</h3></div>
-      {!execution.length?<div className="empty-state">录入课程后自动生成。</div>:<div className="battle-list">
-        {execution.map((c,i)=>{ const low=c.capacity>0&&c.remaining/c.capacity<=.2; return <div className="battle-row" key={c.id}>
-          <div className="battle-num">{String(i+1).padStart(2,"0")}</div>
-          <div className="battle-course"><small>{c.tier} · {c.tier==="A"?"首选":c.tier==="B"?"替代":"保底"}</small><strong>{c.name}</strong><span>{c.time||"时间待填"} · {c.credits}学分</span></div>
-          <div className="battle-seat"><small>剩余名额</small><b>{c.remaining}{c.capacity?` / ${c.capacity}`:""}</b>{low&&<em>优先操作</em>}</div>
-        </div>})}
-      </div>}
-    </section>
-  </div>;
+import {useMemo,useState,type Dispatch,type SetStateAction} from "react";
+import {courseCatalog,remaining,statusOf,type Course,type Section} from "@/data/courseCatalog";
+type Goal="balanced"|"medical"|"data"|"research";
+const goalLabel:Record<Goal,string>={balanced:"综合均衡",medical:"医学基础",data:"医学 × AI / 数据",research:"科研能力"};
+const meet=(s:Section)=>s.meetings.length?s.meetings.map(m=>`${m.weeks} ${m.weekday}${m.periods}${m.room?` · ${m.room}`:""}`).join("；"):"时间待核验";
+const stateText=(s:Section)=>{const st=statusOf(s);if(st==="anomaly")return"数据异常";if(st==="full")return"已满";if(st==="unknown")return"名额未知";const n=remaining(s);return n==null?"可选":`剩 ${n}`};
+const score=(c:Course,s:Section,g:Goal)=>{const p=c.preventiveMedicine,n=remaining(s),cap=s.capacity??0,scar=n==null||!cap?0:Math.max(0,5-n/cap*5),gb=g==="medical"?p.medical:g==="data"?p.dataAi:g==="research"?p.research:(p.medical+p.dataAi+p.research)/3;return p.relevance*.3+gb*.3+(6-p.workload)*.1+scar*.2+(c.credits<=2.5?5:3)*.1};
+export default function CoursePlanner(){
+ const[goal,setGoal]=useState<Goal>("balanced"),[target,setTarget]=useState(4),[hidden,setHidden]=useState<string[]>([]),[conflicts,setConflicts]=useState<string[]>([]);
+ const rows=useMemo(()=>courseCatalog.flatMap(course=>course.sections.map(section=>({course,section,tier:course.preventiveMedicine.tier,score:score(course,section,goal),status:statusOf(section)}))),[goal]);
+ const viable=useMemo(()=>rows.filter(r=>!hidden.includes(r.section.id)&&!conflicts.includes(r.section.id)&&r.status!=="full"&&r.status!=="anomaly"),[rows,hidden,conflicts]);
+ const plans=useMemo(()=>{const build=(tier:"A"|"B"|"C")=>{const x=viable.filter(r=>r.tier===tier).sort((a,b)=>b.score-a.score),out:typeof x=[],used=new Set<string>();let cr=0;for(const r of x){if(used.has(r.course.id)||cr>=target)continue;out.push(r);used.add(r.course.id);cr+=r.course.credits}return out};return{A:build("A"),B:build("B"),C:build("C")}},[viable,target]);
+ const battle=useMemo(()=>{const w={A:3,B:2,C:1};return[...viable].sort((a,b)=>{const t=w[b.tier]-w[a.tier];if(t)return t;const ar=remaining(a.section),br=remaining(b.section),ap=ar==null||!a.section.capacity?1:ar/a.section.capacity,bp=br==null||!b.section.capacity?1:br/b.section.capacity;return ap!==bp?ap-bp:b.score-a.score})},[viable]);
+ const toggle=(id:string,setter:Dispatch<SetStateAction<string[]>>)=>setter(x=>x.includes(id)?x.filter(v=>v!==id):[...x,id]);
+ const credits=(x:typeof viable)=>x.reduce((n,r)=>n+r.course.credits,0);
+ return <div className="planner-shell">
+  <div className="planner-note"><b>V1.1 真实课程模式：</b>第一批课程来自你提供的 2026-2 教务系统截图。当前推荐专业：<b>预防医学</b>。培养方案重复、先修要求和实时余量仍需最终核验，以学校教务系统为准。</div>
+  <section className="planner-panel"><div className="planner-head planner-split"><div><span>01 / PROFILE</span><h3>确定你的选课目标</h3></div><label>目标学分<input type="number" min="1" max="12" step=".5" value={target} onChange={e=>setTarget(+e.target.value)}/></label></div><div className="goal-tabs">{(Object.keys(goalLabel) as Goal[]).map(g=><button key={g} className={goal===g?"active":""} onClick={()=>setGoal(g)}>{goalLabel[g]}</button>)}</div></section>
+  <section className="planner-panel"><div className="planner-head"><span>02 / REAL COURSE POOL</span><h3>真实课程池</h3></div><div className="course-list">{rows.map(({course,section,tier,status})=>{const conflict=conflicts.includes(section.id),excluded=hidden.includes(section.id),left=remaining(section),risky=course.preventiveMedicine.prerequisiteRisk!=="low"||course.preventiveMedicine.duplicateRisk==="unknown";return <article className={`course-row ${excluded?"course-muted":""}`} key={section.id}><div><small>{tier} · {course.code} · {course.category} · 教学班 {section.label}</small><strong>{course.name}</strong><span>{course.credits}学分 · {course.hours}学时 · {section.teacher||"教师待核验"}</span><span>{meet(section)}</span><span>{course.preventiveMedicine.reason}</span>{risky&&<em className="risk-chip">培养方案 / 先修要求待核验</em>}</div><div className="seat-box"><small>{status==="anomaly"?"状态":"名额"}</small><b>{stateText(section)}</b>{left!=null&&section.capacity!=null&&<span>{section.enrolled}/{section.capacity}</span>}</div><div className="tier-actions"><button className={conflict?"active":""} onClick={()=>toggle(section.id,setConflicts)}>{conflict?"已标冲突":"标记冲突"}</button><button className={excluded?"active":""} onClick={()=>toggle(section.id,setHidden)}>{excluded?"恢复":"排除"}</button></div></article>})}</div></section>
+  <section className="planner-panel"><div className="planner-head"><span>03 / A B C</span><h3>生成预防医学 A / B / C 方案</h3></div><div className="plan-grid">{(["A","B","C"] as const).map(t=><div className="plan-card" key={t}><div className="plan-title"><b>{t}</b><span>{t==="A"?"优先方案":t==="B"?"替代方案":"保底方案"}</span></div><div className="plan-credit">{credits(plans[t])} / {target} 学分</div>{!plans[t].length?<p>暂无可用课程</p>:plans[t].map(({course,section})=><div className="plan-item" key={section.id}><strong>{course.name}</strong><span>{section.label} · {course.credits}学分 · {stateText(section)}</span></div>)}</div>)}</div><p className="planner-footnote">A/B/C 回答“值不值得选”；Battle Order 回答“12:00 先点谁”。推荐与抢课顺序分开计算。</p></section>
+  <section className="planner-panel"><div className="planner-head"><span>04 / BATTLE ORDER</span><h3>最终选课顺序</h3></div><div className="battle-list">{battle.map(({course,section,tier},i)=>{const left=remaining(section),low=left!=null&&section.capacity!=null&&left/section.capacity<=.2;return <div className="battle-row" key={section.id}><div className="battle-num">{String(i+1).padStart(2,"0")}</div><div className="battle-course"><small>{tier} · 教学班 {section.label}</small><strong>{course.name}</strong><span>{meet(section)}</span></div><div className="battle-seat"><small>当前截图余量</small><b>{stateText(section)}</b>{low&&<em>优先操作</em>}</div></div>})}</div></section>
+ </div>
 }
