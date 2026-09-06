@@ -1,24 +1,19 @@
 "use client";
-import {useMemo,useState,type Dispatch,type SetStateAction} from "react";
-import {courseCatalog,remaining,statusOf,type Course,type Section} from "@/data/courseCatalog";
-type Goal="balanced"|"medical"|"data"|"research";
-const goalLabel:Record<Goal,string>={balanced:"综合均衡",medical:"医学基础",data:"医学 × AI / 数据",research:"科研能力"};
-const meet=(s:Section)=>s.meetings.length?s.meetings.map(m=>`${m.weeks} ${m.weekday}${m.periods}${m.room?` · ${m.room}`:""}`).join("；"):"时间待核验";
-const stateText=(s:Section)=>{const st=statusOf(s);if(st==="anomaly")return"数据异常";if(st==="full")return"已满";if(st==="unknown")return"名额未知";const n=remaining(s);return n==null?"可选":`剩 ${n}`};
-const score=(c:Course,s:Section,g:Goal)=>{const p=c.preventiveMedicine,n=remaining(s),cap=s.capacity??0,scar=n==null||!cap?0:Math.max(0,5-n/cap*5),gb=g==="medical"?p.medical:g==="data"?p.dataAi:g==="research"?p.research:(p.medical+p.dataAi+p.research)/3;return p.relevance*.3+gb*.3+(6-p.workload)*.1+scar*.2+(c.credits<=2.5?5:3)*.1};
-export default function CoursePlanner(){
- const[goal,setGoal]=useState<Goal>("balanced"),[target,setTarget]=useState(4),[hidden,setHidden]=useState<string[]>([]),[conflicts,setConflicts]=useState<string[]>([]);
- const rows=useMemo(()=>courseCatalog.flatMap(course=>course.sections.map(section=>({course,section,tier:course.preventiveMedicine.tier,score:score(course,section,goal),status:statusOf(section)}))),[goal]);
- const viable=useMemo(()=>rows.filter(r=>!hidden.includes(r.section.id)&&!conflicts.includes(r.section.id)&&r.status!=="full"&&r.status!=="anomaly"),[rows,hidden,conflicts]);
- const plans=useMemo(()=>{const build=(tier:"A"|"B"|"C")=>{const x=viable.filter(r=>r.tier===tier).sort((a,b)=>b.score-a.score),out:typeof x=[],used=new Set<string>();let cr=0;for(const r of x){if(used.has(r.course.id)||cr>=target)continue;out.push(r);used.add(r.course.id);cr+=r.course.credits}return out};return{A:build("A"),B:build("B"),C:build("C")}},[viable,target]);
- const battle=useMemo(()=>{const w={A:3,B:2,C:1};return[...viable].sort((a,b)=>{const t=w[b.tier]-w[a.tier];if(t)return t;const ar=remaining(a.section),br=remaining(b.section),ap=ar==null||!a.section.capacity?1:ar/a.section.capacity,bp=br==null||!b.section.capacity?1:br/b.section.capacity;return ap!==bp?ap-bp:b.score-a.score})},[viable]);
- const toggle=(id:string,setter:Dispatch<SetStateAction<string[]>>)=>setter(x=>x.includes(id)?x.filter(v=>v!==id):[...x,id]);
- const credits=(x:typeof viable)=>x.reduce((n,r)=>n+r.course.credits,0);
- return <div className="planner-shell">
-  <div className="planner-note"><b>V1.1 真实课程模式：</b>第一批课程来自你提供的 2026-2 教务系统截图。当前推荐专业：<b>预防医学</b>。培养方案重复、先修要求和实时余量仍需最终核验，以学校教务系统为准。</div>
-  <section className="planner-panel"><div className="planner-head planner-split"><div><span>01 / PROFILE</span><h3>确定你的选课目标</h3></div><label>目标学分<input type="number" min="1" max="12" step=".5" value={target} onChange={e=>setTarget(+e.target.value)}/></label></div><div className="goal-tabs">{(Object.keys(goalLabel) as Goal[]).map(g=><button key={g} className={goal===g?"active":""} onClick={()=>setGoal(g)}>{goalLabel[g]}</button>)}</div></section>
-  <section className="planner-panel"><div className="planner-head"><span>02 / REAL COURSE POOL</span><h3>真实课程池</h3></div><div className="course-list">{rows.map(({course,section,tier,status})=>{const conflict=conflicts.includes(section.id),excluded=hidden.includes(section.id),left=remaining(section),risky=course.preventiveMedicine.prerequisiteRisk!=="low"||course.preventiveMedicine.duplicateRisk==="unknown";return <article className={`course-row ${excluded?"course-muted":""}`} key={section.id}><div><small>{tier} · {course.code} · {course.category} · 教学班 {section.label}</small><strong>{course.name}</strong><span>{course.credits}学分 · {course.hours}学时 · {section.teacher||"教师待核验"}</span><span>{meet(section)}</span><span>{course.preventiveMedicine.reason}</span>{risky&&<em className="risk-chip">培养方案 / 先修要求待核验</em>}</div><div className="seat-box"><small>{status==="anomaly"?"状态":"名额"}</small><b>{stateText(section)}</b>{left!=null&&section.capacity!=null&&<span>{section.enrolled}/{section.capacity}</span>}</div><div className="tier-actions"><button className={conflict?"active":""} onClick={()=>toggle(section.id,setConflicts)}>{conflict?"已标冲突":"标记冲突"}</button><button className={excluded?"active":""} onClick={()=>toggle(section.id,setHidden)}>{excluded?"恢复":"排除"}</button></div></article>})}</div></section>
-  <section className="planner-panel"><div className="planner-head"><span>03 / A B C</span><h3>生成预防医学 A / B / C 方案</h3></div><div className="plan-grid">{(["A","B","C"] as const).map(t=><div className="plan-card" key={t}><div className="plan-title"><b>{t}</b><span>{t==="A"?"优先方案":t==="B"?"替代方案":"保底方案"}</span></div><div className="plan-credit">{credits(plans[t])} / {target} 学分</div>{!plans[t].length?<p>暂无可用课程</p>:plans[t].map(({course,section})=><div className="plan-item" key={section.id}><strong>{course.name}</strong><span>{section.label} · {course.credits}学分 · {stateText(section)}</span></div>)}</div>)}</div><p className="planner-footnote">A/B/C 回答“值不值得选”；Battle Order 回答“12:00 先点谁”。推荐与抢课顺序分开计算。</p></section>
-  <section className="planner-panel"><div className="planner-head"><span>04 / BATTLE ORDER</span><h3>最终选课顺序</h3></div><div className="battle-list">{battle.map(({course,section,tier},i)=>{const left=remaining(section),low=left!=null&&section.capacity!=null&&left/section.capacity<=.2;return <div className="battle-row" key={section.id}><div className="battle-num">{String(i+1).padStart(2,"0")}</div><div className="battle-course"><small>{tier} · 教学班 {section.label}</small><strong>{course.name}</strong><span>{meet(section)}</span></div><div className="battle-seat"><small>当前截图余量</small><b>{stateText(section)}</b>{low&&<em>优先操作</em>}</div></div>})}</div></section>
- </div>
+
+export default function CoursePlanner() {
+  return (
+    <div className="planner-shell">
+      <section className="planner-panel">
+        <div className="planner-head">
+          <span>V1.2 / DATA RECALIBRATION</span>
+          <h3>选课助手正在校正</h3>
+        </div>
+        <div className="planner-note">
+          已删除旧的“预防医学 / 专业外课程”推荐模型。
+          V1.2 将仅使用 2026 级实际可选的通识教育选修课程，
+          并以临床医学 1 班课表进行周次 × 星期 × 节次冲突检测。
+        </div>
+      </section>
+    </div>
+  );
 }
