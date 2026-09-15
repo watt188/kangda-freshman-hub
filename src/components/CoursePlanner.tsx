@@ -21,7 +21,7 @@ const optionId = (o: Option) => `${o.course.id}:${o.section.id}`;
 
 const meetingText = (s: Section) =>
   s.meetings
-    .map((m) => `星期${weekdayName(m.weekday)} 第${m.periods[0]}-${m.periods[1]}节`)
+    .map((m) => `星期${weekdayName(m.weekday)} 第${m.periods[0]}-${m.periods[1]}节${m.room ? ` · ${m.room}` : ""}`)
     .join("；");
 
 const score = (o: Option) => {
@@ -125,7 +125,6 @@ export default function CoursePlanner() {
                   <strong>{o.course.name}</strong>
                   <small>
                     {o.course.credits} 学分 · {o.course.hours} 学时 · {meetingText(o.section)}
-                    {o.section.room ? ` · ${o.section.room}` : ""}
                   </small>
                   {o.conflictWithClass && <em className="risk-chip">与临床1班必修课冲突</em>}
                   {withBrain && <em className="risk-chip">与“探索大脑奥秘”冲突</em>}
